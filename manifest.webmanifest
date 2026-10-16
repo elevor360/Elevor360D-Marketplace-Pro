@@ -1,7 +1,7 @@
 {
-  "name": "Elevor360D Marketplace Pro V20",
-  "short_name": "Marketplace V20",
-  "description": "Multi-seller marketplace with administrator seller overview and optional fee planning",
+  "name": "Elevor360D Marketplace Pro V21",
+  "short_name": "Marketplace V21",
+  "description": "Multi-seller marketplace with in-app message notification centre",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
