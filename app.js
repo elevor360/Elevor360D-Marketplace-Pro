@@ -180,7 +180,33 @@ async function publishOnline(status){
 }
 $('onlinePublish').addEventListener('click',()=>publishOnline('published'));
 $('onlineDraft').addEventListener('click',()=>publishOnline('draft'));
-async function refreshMineCloud(){const target=$('onlineMineResults');target.replaceChildren();try{const a=await ensureAuth();const rows=await cloudRequest('GET','marketplace_listings?select=id,title,price,status,created_at&owner_id=eq.'+encodeURIComponent(a.user.id)+'&order=created_at.desc&limit=100');if(!Array.isArray(rows))throw Error('Unexpected response');if(!rows.length){target.append(el('p','muted','No cloud listings in your account yet.'));return}for(const item of rows){const wrap=el('article','enquiry-entry');wrap.append(el('strong','',item.title),el('p','muted','£'+Number(item.price).toFixed(2)+' · '+item.status));const action=el('div','toolbar');for(const [state,label] of [['published','Publish'],['draft','Unpublish'],['sold','Mark Sold']]){if(item.status===state)continue;const b=el('button','secondary',label);b.addEventListener('click',async()=>{try{onlineStatus('Updating listing…');await cloudRequest('PATCH','marketplace_listings?id=eq.'+encodeURIComponent(item.id),{status:state});onlineStatus('Listing updated.');await Promise.all([refreshMineCloud(),refreshCloud()])}catch(e){onlineStatus('Error: '+e.message)}});action.append(b)}const del=el('button','secondary','Delete Cloud Listing');del.addEventListener('click',async()=>{if(!confirm('Permanently delete this cloud listing? This cannot be undone.'))return;try{const deleted=await cloudRequest('DELETE','marketplace_listings?id=eq.'+encodeURIComponent(item.id)+'&owner_id=eq.'+encodeURIComponent(a.user.id));if(!Array.isArray(deleted)||deleted.length!==1||deleted[0].id!==item.id)throw Error('Supabase did not delete this listing. Run SUPABASE_V25_6_DELETE_FIX.sql, then try again.');onlineStatus('Cloud listing deleted successfully.');await Promise.all([refreshMineCloud(),refreshCloud()])}catch(e){onlineStatus('Error: '+e.message)}});action.append(del);wrap.append(action);target.append(wrap)}}catch(e){target.append(el('p','muted','Sign in to view your cloud listings. '+e.message))}}
+// V25.7: remove only the signed-in seller's own Supabase Storage photos.
+// Never delete arbitrary URLs or another account's files.
+function ownedPhotoPaths(photos, userId){
+ const c=authConfig();const prefix=c.url.replace(/\/$/,'')+'/storage/v1/object/public/marketplace-photos/';
+ const paths=[];
+ for(const url of Array.isArray(photos)?photos:[]){
+  if(typeof url!=='string'||!url.startsWith(prefix))continue;
+  let path;try{path=decodeURIComponent(url.slice(prefix.length).split('?')[0])}catch{continue}
+  if(!/^[-a-f0-9]{36}\/[-a-f0-9]{36}\.jpg$/i.test(path))continue;
+  if(path.split('/')[0]!==userId)continue;
+  paths.push(path);
+ }
+ return [...new Set(paths)];
+}
+async function removeOwnedListingPhotos(photos, session){
+ const paths=ownedPhotoPaths(photos,session.user.id);if(!paths.length)return {removed:0,failed:0};
+ const c=authConfig();let removed=0,failed=0;
+ for(const path of paths){
+  try{
+   const r=await fetch(c.url+'/storage/v1/object/marketplace-photos/'+path,{method:'DELETE',headers:{apikey:c.key,Authorization:'Bearer '+session.access_token},cache:'no-store'});
+   if(!r.ok)throw Error('Storage HTTP '+r.status);
+   removed++;
+  }catch{failed++}
+ }
+ return {removed,failed};
+}
+async function refreshMineCloud(){const target=$('onlineMineResults');target.replaceChildren();try{const a=await ensureAuth();const rows=await cloudRequest('GET','marketplace_listings?select=id,title,price,status,created_at,photos&owner_id=eq.'+encodeURIComponent(a.user.id)+'&order=created_at.desc&limit=100');if(!Array.isArray(rows))throw Error('Unexpected response');if(!rows.length){target.append(el('p','muted','No cloud listings in your account yet.'));return}for(const item of rows){const wrap=el('article','enquiry-entry');wrap.append(el('strong','',item.title),el('p','muted','£'+Number(item.price).toFixed(2)+' · '+item.status));const action=el('div','toolbar');for(const [state,label] of [['published','Publish'],['draft','Unpublish'],['sold','Mark Sold']]){if(item.status===state)continue;const b=el('button','secondary',label);b.addEventListener('click',async()=>{try{onlineStatus('Updating listing…');await cloudRequest('PATCH','marketplace_listings?id=eq.'+encodeURIComponent(item.id),{status:state});onlineStatus('Listing updated.');await Promise.all([refreshMineCloud(),refreshCloud()])}catch(e){onlineStatus('Error: '+e.message)}});action.append(b)}const del=el('button','secondary','Delete Cloud Listing');del.addEventListener('click',async()=>{if(!confirm('Permanently delete this cloud listing? This cannot be undone.'))return;try{const deleted=await cloudRequest('DELETE','marketplace_listings?id=eq.'+encodeURIComponent(item.id)+'&owner_id=eq.'+encodeURIComponent(a.user.id));if(!Array.isArray(deleted)||deleted.length!==1||deleted[0].id!==item.id)throw Error('Supabase did not delete this listing. Run SUPABASE_V25_6_DELETE_FIX.sql, then try again.');const photoResult=await removeOwnedListingPhotos(item.photos,a);onlineStatus(photoResult.failed?'Cloud listing deleted, but '+photoResult.failed+' photo(s) could not be removed from Storage. Check SUPABASE_V25_7_PHOTO_CLEANUP.sql and remove remaining files manually.':'Cloud listing and '+photoResult.removed+' stored photo(s) deleted successfully.');await Promise.all([refreshMineCloud(),refreshCloud()])}catch(e){onlineStatus('Error: '+e.message)}});action.append(del);wrap.append(action);target.append(wrap)}}catch(e){target.append(el('p','muted','Sign in to view your cloud listings. '+e.message))}}
 $('onlineMineRefresh').addEventListener('click',refreshMineCloud);
 
 // Load public products for every visitor without requiring login or manual connection.
