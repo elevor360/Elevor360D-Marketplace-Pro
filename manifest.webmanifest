@@ -1,7 +1,7 @@
 {
-  "name": "Elevor360D Marketplace Pro V18",
-  "short_name": "Marketplace V18",
-  "description": "Marketplace Pro V10 local offers and price negotiation tracking",
+  "name": "Elevor360D Marketplace Pro V19",
+  "short_name": "Marketplace V19",
+  "description": "Multi-seller marketplace with administrator seller overview and optional fee planning",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
