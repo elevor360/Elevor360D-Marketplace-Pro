@@ -1,7 +1,7 @@
 {
-  "name": "Elevor360D Marketplace Pro V23.2",
+  "name": "Elevor360D Marketplace Pro",
   "short_name": "Marketplace Pro",
-  "description": "Marketplace Pro with compact navigation and improved offline updates",
+  "description": "Marketplace with seller accounts, listings, messages, moderation and direct seller-arranged payments",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
