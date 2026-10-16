@@ -1,7 +1,7 @@
 {
-  "name": "Elevor360D Marketplace Pro V21",
-  "short_name": "Marketplace V21",
-  "description": "Multi-seller marketplace with in-app message notification centre",
+  "name": "Elevor360D Marketplace Pro V22",
+  "short_name": "Marketplace V22",
+  "description": "Marketplace with local privacy and security controls",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
