@@ -139,3 +139,27 @@ document.querySelector('button[data-page="admin"]').addEventListener('click',()=
 // Recheck on every account change and when returning to the app.
 const oldAuthView=authView;authView=function(){oldAuthView();adminCheck()};
 adminCheck();
+
+
+// V17: authenticated reporting and administrator moderation.
+function reportNotice(t){$('myReportsStatus').textContent=t}
+async function submitListingReport(x){
+ if(!authSession){alert('Please sign in under My Account to report a listing.');show('account');return}
+ if(x.ownerId===authSession.user?.id){alert('You cannot report your own listing.');return}
+ const reason=prompt('Why are you reporting this listing? Enter one: Scam, Prohibited item, Misleading, Harassment, Other');
+ if(reason===null)return;
+ const valid=['Scam','Prohibited item','Misleading','Harassment','Other'];
+ const matched=valid.find(v=>v.toLowerCase()===reason.trim().toLowerCase());
+ if(!matched){alert('Please enter one of the listed reasons.');return}
+ const details=prompt('Optional details for the administrator (maximum 1000 characters):','');
+ if(details===null)return;
+ if(details.length>1000){alert('Details are too long.');return}
+ try{await cloudRequest('POST','marketplace_listing_reports',{listing_id:x.id.slice(6),reason:matched,details:details.trim()});alert('Report submitted confidentially. Thank you.')}catch(e){alert('Unable to submit report: '+e.message)}
+}
+// Add a report control to cloud cards after the existing card has been built.
+const renderCloudV16=renderCloud;
+renderCloud=function(){renderCloudV16();const cards=$('cloudResults').querySelectorAll('.item');cloudListings.forEach((x,i)=>{if(!cards[i])return;const b=el('button','secondary','Report Listing');b.type='button';b.addEventListener('click',()=>submitListingReport(x));(cards[i].querySelector('.item-actions')||cards[i]).append(b)})};
+$('myReportsRefresh').addEventListener('click',async()=>{const target=$('myReportsList');target.replaceChildren();try{const a=await ensureAuth();const rows=await cloudRequest('GET','marketplace_listing_reports?select=id,reason,details,status,created_at&reporter_id=eq.'+encodeURIComponent(a.user.id)+'&order=created_at.desc&limit=100');for(const r of rows){const entry=el('article','enquiry-entry');entry.append(el('strong','',r.reason),el('p','muted',new Date(r.created_at).toLocaleString('en-GB')+' · '+r.status),el('p','',r.details||'No additional details'));target.append(entry)}if(!rows.length)target.append(el('p','muted','You have not submitted any reports.'));reportNotice('Your reports loaded.')}catch(e){reportNotice('Unable to load reports: '+e.message)}});
+async function moderationRefresh(){const target=$('moderationQueue');target.replaceChildren();if(!adminReady)return;try{const rows=await adminRPC('marketplace_admin_reports');for(const r of rows){const entry=el('article','enquiry-entry');entry.append(el('strong','',r.listing_title||'Listing unavailable'),el('p','muted',r.reason+' · '+r.status+' · '+new Date(r.created_at).toLocaleString('en-GB')),el('p','',r.details||'No details'));const actions=el('div','toolbar');for(const [action,label] of [['reviewing','Mark Reviewing'],['dismissed','Dismiss Report'],['blocked','Block Listing'],['resolved','Resolve Report'],['restore','Restore Listing']]){if(action==='restore'&&r.listing_status!=='blocked')continue;if(action==='blocked'&&r.listing_status==='blocked')continue;const b=el('button','secondary',label);b.type='button';b.addEventListener('click',async()=>{if(['blocked','restore'].includes(action)&&!confirm(label+'?'))return;b.disabled=true;try{await adminRPC('marketplace_admin_moderate',{p_report_id:r.id,p_action:action});await moderationRefresh();await refreshCloud();}catch(e){alert('Moderation failed: '+e.message);b.disabled=false}});actions.append(b)}entry.append(actions);target.append(entry)}if(!rows.length)target.append(el('p','muted','No reports received.'))}catch(e){target.append(el('p','muted','Unable to load reports: '+e.message))}}
+const adminRefreshV16=adminRefresh;
+adminRefresh=async function(){await adminRefreshV16();await moderationRefresh()};
