@@ -1,5 +1,5 @@
 // V25: network-first updates; offline cache fallback.
-const CACHE='elevor360d-marketplace-v25-5-cache-1';
+const CACHE='elevor360d-marketplace-v25-6-cache-1';
 const ASSETS=['./','./index.html','./app.js','./marketplace-config.js','./manifest.webmanifest','./icon-192.png','./icon-512.png','./payments-v18.js','./seller-management-v19.js','./transactions-v20.js','./notifications-v21.js','./privacy-v22.js','./accessibility-v23.js','./reliability-v24.js'];
 self.addEventListener('install',event=>{event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',event=>{event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key.startsWith('elevor360d-marketplace-')&&key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim()))});

@@ -38,7 +38,8 @@ begin
      raise exception 'Listing is blocked by marketplace moderation' using errcode='42501';
    end if;
  end if;
- return new;
+ if TG_OP = 'DELETE' then return OLD; end if;
+ return NEW;
 end $$;
 revoke all on function public.marketplace_guard_moderation() from public,anon,authenticated;
 drop trigger if exists marketplace_blocked_listing_guard on public.marketplace_listings;
