@@ -71,7 +71,7 @@ function renderCloud(){const target=$('cloudResults');if(!target)return;target.r
 function validateCloudConfig(url,key){const u=new URL(url);if(u.protocol!=='https:'||!u.hostname.endsWith('.supabase.co')||u.username||u.password||u.search||u.hash||u.pathname!=='/')throw Error('Enter your HTTPS Supabase project URL without a path.');if(!/^(sb_publishable_[A-Za-z0-9_-]+|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.test(key))throw Error('Use a publishable key or legacy anon JWT. Never use a secret or service-role key.');return u.origin}
 $('cloudSave').addEventListener('click',()=>{try{const url=validateCloudConfig($('cloudUrl').value.trim().replace(/\/$/,'' )+'/', $('cloudKey').value.trim());cloudConfig={url,key:$('cloudKey').value.trim()};localStorage.setItem(CLOUD_SETTINGS,JSON.stringify(cloudConfig));cloudMessage('Connection saved. Select Refresh Listings to test.')}catch(e){cloudMessage(e.message)}});
 $('cloudDisconnect').addEventListener('click',()=>{cloudConfig={url:'',key:''};cloudListings=[];localStorage.removeItem(CLOUD_SETTINGS);$('cloudUrl').value='';$('cloudKey').value='';cloudMessage('Disconnected. Local listings are unaffected.');render()});
-async function refreshCloud(){if(!cloudConfig.url||!cloudConfig.key){cloudMessage('Marketplace owner: configure marketplace-config.js once, then upload it to GitHub Pages.');return}cloudMessage('Loading published listings…');try{validateCloudConfig(cloudConfig.url+'/',cloudConfig.key);const ctl=new AbortController();const timeout=setTimeout(()=>ctl.abort(),12000);let res;try{res=await fetch(cloudConfig.url+'/rest/v1/marketplace_listings?select=id,title,price,category,condition,location,description,photos,created_at,status,owner_id&status=eq.published&order=created_at.desc&limit=100',{headers:{apikey:cloudConfig.key,...(cloudConfig.key.startsWith('eyJ')?{Authorization:'Bearer '+cloudConfig.key}:{})},signal:ctl.signal,cache:'no-store'})}finally{clearTimeout(timeout)}if(!res.ok)throw Error('HTTP '+res.status+' — check SQL setup, RLS policy and project URL/key.');const data=await res.json();if(!Array.isArray(data))throw Error('Unexpected response from Supabase');cloudListings=data.filter(x=>x&&typeof x.id==='string'&&typeof x.title==='string'&&Number.isFinite(Number(x.price))).map(x=>({id:'cloud:'+x.id,name:x.title,price:Number(x.price),type:x.category||'Other',condition:x.condition||'',location:x.location||'',description:x.description||'',photos:Array.isArray(x.photos)?x.photos.filter(p=>typeof p==='string'&&p.startsWith('https://')).slice(0,4):[],status:'available',created:x.created_at,cloud:true,ownerId:x.owner_id}));cloudMessage('Connected · '+cloudListings.length+' published listing(s) loaded.');render()}catch(e){cloudMessage('Unable to load: '+(e.name==='AbortError'?'request timed out':e.message)+'. Existing local listings are unaffected.')}}
+async function refreshCloud(){if(!cloudConfig.url||!cloudConfig.key){cloudMessage('Marketplace owner: configure marketplace-config.js once, then upload it to GitHub Pages.');return}cloudMessage('Loading published listings…');try{validateCloudConfig(cloudConfig.url+'/',cloudConfig.key);const ctl=new AbortController();const timeout=setTimeout(()=>ctl.abort(),12000);let res;try{res=await fetch(cloudConfig.url+'/rest/v1/marketplace_listings?select=id,title,price,category,condition,location,description,photos,created_at,status,owner_id&status=eq.published&order=created_at.desc&limit=100',{headers:{apikey:cloudConfig.key,...(cloudConfig.key.startsWith('eyJ')?{Authorization:'Bearer '+cloudConfig.key}:{})},signal:ctl.signal,cache:'no-store'})}finally{clearTimeout(timeout)}if(!res.ok)throw Error('HTTP '+res.status+' — check SQL setup, RLS policy and project URL/key.');const data=await res.json();if(!Array.isArray(data))throw Error('Unexpected response from Supabase');cloudListings=data.filter(x=>x&&typeof x.id==='string'&&typeof x.title==='string'&&Number.isFinite(Number(x.price))).map(x=>({id:'cloud:'+x.id,name:x.title,price:Number(x.price),type:x.category||'Other',condition:x.condition||'',location:x.location||'',description:x.description||'',photos:Array.isArray(x.photos)?x.photos.filter(p=>typeof p==='string'&&p.startsWith('https://')).slice(0,4):[],status:'available',created:x.created_at,cloud:true,ownerId:x.owner_id}));cloudMessage('Connected · '+cloudListings.length+' published listing(s) loaded · '+cloudListings.filter(x=>x.photos.length).length+' with photo links.');render()}catch(e){cloudMessage('Unable to load: '+(e.name==='AbortError'?'request timed out':e.message)+'. Existing local listings are unaffected.')}}
 $('cloudRefresh').addEventListener('click',refreshCloud);
 
 let deferred;window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferred=e;$('install').style.display='inline-block'});$('install').addEventListener('click',async()=>{if(!deferred)return;deferred.prompt();await deferred.userChoice;deferred=null;$('install').style.display='none'});window.addEventListener('appinstalled',()=>{$('install').style.display='none';deferred=null});if('serviceWorker'in navigator)window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));render();
@@ -102,12 +102,82 @@ async function cloudRequest(method,path,body){const c=authConfig(),s=await ensur
 function cloudPayload(){const title=$('onlineTitle').value.trim(),price=Number($('onlinePrice').value),raw=$('onlinePhoto').value.trim();if(title.length<1||title.length>90)throw Error('Enter a product title (1–90 characters).');if(!$('onlinePrice').value.trim()||!Number.isFinite(price)||price<0||price>99999999)throw Error('Enter a valid price.');let photos=[];if(raw){const u=new URL(raw);if(u.protocol!=='https:'||u.username||u.password)throw Error('Photo link must use HTTPS.');photos=[u.href]}return {title,price,category:$('onlineCategory').value,condition:$('onlineCondition').value,location:$('onlineLocation').value.trim().slice(0,80),description:$('onlineDescription').value.trim().slice(0,1500),photos}}
 // V25.2: device photo uploads use Supabase Storage; never expose service-role keys.
 let onlinePreviewURL=null;
+let preparedOnlinePhoto=null;
+let onlinePhotoProcessing=null;
 const onlineFile=$('onlinePhotoFile');
-function resetOnlinePhoto(){onlineFile.value='';if(onlinePreviewURL)URL.revokeObjectURL(onlinePreviewURL);onlinePreviewURL=null;$('onlinePhotoPreview').hidden=true;$('onlinePhotoPreview').removeAttribute('src');$('onlinePhotoStatus').textContent='';}
-onlineFile.addEventListener('change',()=>{if(onlinePreviewURL)URL.revokeObjectURL(onlinePreviewURL);onlinePreviewURL=null;const f=onlineFile.files?.[0];if(!f){resetOnlinePhoto();return}if(!['image/jpeg','image/png','image/webp','image/gif'].includes(f.type)||f.size>5*1024*1024){resetOnlinePhoto();$('onlinePhotoStatus').textContent='Choose a JPG, PNG, WebP or GIF image no larger than 5 MB.';return}onlinePreviewURL=URL.createObjectURL(f);$('onlinePhotoPreview').src=onlinePreviewURL;$('onlinePhotoPreview').hidden=false;$('onlinePhotoStatus').textContent=f.name+' selected.';});
+const MB=1024*1024;
+function photoSize(bytes){return (bytes/MB).toFixed(2)+' MB'}
+function resetOnlinePhoto(){onlineFile.value='';preparedOnlinePhoto=null;onlinePhotoProcessing=null;if(onlinePreviewURL)URL.revokeObjectURL(onlinePreviewURL);onlinePreviewURL=null;$('onlinePhotoPreview').hidden=true;$('onlinePhotoPreview').removeAttribute('src');$('onlinePhotoStatus').textContent='';}
+function compressOnlinePhoto(file){return new Promise((resolve,reject)=>{
+ if(!['image/jpeg','image/png','image/webp','image/gif'].includes(file.type))return reject(Error('Choose a JPG, PNG, WebP or GIF photograph.'));
+ if(file.size>25*MB)return reject(Error('Photo exceeds 25 MB. Please choose a smaller photo.'));
+ const objectURL=URL.createObjectURL(file),img=new Image();
+ img.onerror=()=>{URL.revokeObjectURL(objectURL);reject(Error('This image could not be opened. Try a JPG or PNG.'))};
+ img.onload=async()=>{URL.revokeObjectURL(objectURL);try{
+  if(!img.naturalWidth||!img.naturalHeight)throw Error('The image is empty.');
+  const maxEdge=1600,scale=Math.min(1,maxEdge/Math.max(img.naturalWidth,img.naturalHeight));
+  const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));
+  const ctx=canvas.getContext('2d');if(!ctx)throw Error('Photo resizing is unavailable on this device.');
+  ctx.fillStyle='#ffffff';ctx.fillRect(0,0,canvas.width,canvas.height);ctx.drawImage(img,0,0,canvas.width,canvas.height);
+  const toBlob=(quality)=>new Promise((ok,no)=>canvas.toBlob(b=>b?ok(b):no(Error('Could not compress the photo.')),'image/jpeg',quality));
+  let blob=await toBlob(.82);
+  for(const q of [.7,.55,.4]){if(blob.size<=5*MB)break;blob=await toBlob(q)}
+  if(blob.size>5*MB)throw Error('This image could not be reduced below 5 MB. Please choose a smaller image.');
+  resolve({blob,originalSize:file.size,width:canvas.width,height:canvas.height});
+ }catch(e){reject(e)}};
+ img.src=objectURL;
+})}
+onlineFile.addEventListener('change',()=>{
+ if(onlinePreviewURL)URL.revokeObjectURL(onlinePreviewURL);onlinePreviewURL=null;preparedOnlinePhoto=null;
+ const f=onlineFile.files?.[0];if(!f){resetOnlinePhoto();return}
+ if(!['image/jpeg','image/png','image/webp','image/gif'].includes(f.type)||f.size>25*MB){resetOnlinePhoto();$('onlinePhotoStatus').textContent='Choose a JPG, PNG, WebP or GIF image up to 25 MB.';return}
+ onlinePreviewURL=URL.createObjectURL(f);$('onlinePhotoPreview').src=onlinePreviewURL;$('onlinePhotoPreview').hidden=false;
+ $('onlinePhotoStatus').textContent='Preparing photo ('+photoSize(f.size)+')…';
+ const currentFile=f;
+ onlinePhotoProcessing=compressOnlinePhoto(f).then(result=>{
+  if(onlineFile.files?.[0]!==currentFile)return;
+  preparedOnlinePhoto=result.blob;
+  $('onlinePhotoStatus').textContent='Ready to upload: '+photoSize(result.blob.size)+' (original '+photoSize(result.originalSize)+', '+result.width+'×'+result.height+' pixels).';
+ }).catch(err=>{if(onlineFile.files?.[0]===currentFile){preparedOnlinePhoto=null;$('onlinePhotoStatus').textContent='Photo error: '+err.message;}});
+});
 $('onlinePhotoClear').addEventListener('click',resetOnlinePhoto);
-async function uploadOnlinePhoto(s){const f=onlineFile.files?.[0];if(!f)return null;if(!['image/jpeg','image/png','image/webp','image/gif'].includes(f.type)||f.size>5*1024*1024)throw Error('Photo must be JPG, PNG, WebP or GIF and no larger than 5 MB.');const ext={'image/jpeg':'jpg','image/png':'png','image/webp':'webp','image/gif':'gif'}[f.type];const path=s.user.id+'/'+crypto.randomUUID()+'.'+ext;const c=authConfig();onlineStatus('Uploading product photo…');const r=await fetch(c.url+'/storage/v1/object/marketplace-photos/'+path,{method:'POST',headers:{apikey:c.key,Authorization:'Bearer '+s.access_token,'Content-Type':f.type,'x-upsert':'false'},body:f});if(!r.ok){let d={};try{d=await r.json()}catch{}throw Error('Photo upload failed: '+(d.message||d.error||'HTTP '+r.status)+'. Run SUPABASE_V25_2_PHOTOS.sql in Supabase SQL Editor.')}return c.url+'/storage/v1/object/public/marketplace-photos/'+path;}
-async function publishOnline(status){let btn=$('onlinePublish'),draft=$('onlineDraft');btn.disabled=draft.disabled=true;try{onlineStatus('Saving '+status+'…');const s=await ensureAuth();const payload={...cloudPayload(),owner_id:s.user.id,status};const photo=await uploadOnlinePhoto(s);if(photo)payload.photos=[photo];await cloudRequest('POST','marketplace_listings',payload);onlineStatus(status==='published'?'Product published successfully.':'Private cloud draft saved.');resetOnlinePhoto();await Promise.all([refreshCloud(),refreshMineCloud()])}catch(e){onlineStatus('Error: '+e.message)}finally{btn.disabled=draft.disabled=false}}
+async function uploadOnlinePhoto(s){
+ const f=onlineFile.files?.[0];if(!f)return null;
+ if(onlinePhotoProcessing)await onlinePhotoProcessing;
+ if(!preparedOnlinePhoto)throw Error('Photo could not be prepared. Select another photo and try again.');
+ const blob=preparedOnlinePhoto;
+ if(blob.size>5*MB)throw Error('Prepared photo exceeds 5 MB.');
+ const path=s.user.id+'/'+crypto.randomUUID()+'.jpg';const c=authConfig();onlineStatus('Uploading optimised product photo ('+photoSize(blob.size)+')…');
+ const r=await fetch(c.url+'/storage/v1/object/marketplace-photos/'+path,{method:'POST',headers:{apikey:c.key,Authorization:'Bearer '+s.access_token,'Content-Type':'image/jpeg','x-upsert':'false'},body:blob});
+ if(!r.ok){let d={};try{d=await r.json()}catch{}throw Error('Photo upload failed: '+(d.message||d.error||'HTTP '+r.status)+'. Check Supabase Storage setup.');}
+ return c.url+'/storage/v1/object/public/marketplace-photos/'+path;
+}
+async function publishOnline(status){
+ const btn=$('onlinePublish'),draft=$('onlineDraft');btn.disabled=draft.disabled=true;
+ try{
+  const selected=onlineFile.files?.[0];
+  if(!selected && !$('onlinePhoto').value.trim())throw Error('Please choose a product photo before publishing.');
+  onlineStatus('Checking account…');const session=await ensureAuth();
+  const payload={...cloudPayload(),owner_id:session.user.id,status};
+  const photo=await uploadOnlinePhoto(session);if(photo)payload.photos=[photo];
+  if(!payload.photos.length)throw Error('No photo was attached. Please select the photo again.');
+  onlineStatus('Saving listing and photo address…');
+  const created=await cloudRequest('POST','marketplace_listings',payload);
+  if(!Array.isArray(created)||!created[0]?.id)throw Error('Supabase did not return the new listing. Check database permissions.');
+  const saved=created[0];
+  if(!Array.isArray(saved.photos)||saved.photos[0]!==payload.photos[0]){
+   onlineStatus('Listing saved, but the photo address was not returned by Supabase. Please check the marketplace_listings.photos column and SQL policies.');
+   return;
+  }
+  let publiclyAccessible=true;
+  try{const probe=await fetch(payload.photos[0],{method:'GET',cache:'no-store'});publiclyAccessible=probe.ok;if(probe.body)await probe.body.cancel()}catch{publiclyAccessible=false}
+  if(!publiclyAccessible){onlineStatus('Listing saved, but the photo is not publicly accessible. Check that Supabase Storage bucket marketplace-photos is PUBLIC and the image exists.');return}
+  resetOnlinePhoto();await Promise.all([refreshCloud(),refreshMineCloud()]);
+  const visible=cloudListings.find(x=>x.id==='cloud:'+saved.id);
+  if(status==='published'&&(!visible||!visible.photos?.length))onlineStatus('Listing saved but its photo did not appear in the public feed. Refresh Listings and check the photos field in Supabase.');
+  else onlineStatus(status==='published'?'Product and photo published successfully.':'Private cloud draft and photo saved.');
+ }catch(e){onlineStatus('Error: '+e.message)}finally{btn.disabled=draft.disabled=false}
+}
 $('onlinePublish').addEventListener('click',()=>publishOnline('published'));
 $('onlineDraft').addEventListener('click',()=>publishOnline('draft'));
 async function refreshMineCloud(){const target=$('onlineMineResults');target.replaceChildren();try{const a=await ensureAuth();const rows=await cloudRequest('GET','marketplace_listings?select=id,title,price,status,created_at&owner_id=eq.'+encodeURIComponent(a.user.id)+'&order=created_at.desc&limit=100');if(!Array.isArray(rows))throw Error('Unexpected response');if(!rows.length){target.append(el('p','muted','No cloud listings in your account yet.'));return}for(const item of rows){const wrap=el('article','enquiry-entry');wrap.append(el('strong','',item.title),el('p','muted','£'+Number(item.price).toFixed(2)+' · '+item.status));const action=el('div','toolbar');for(const [state,label] of [['published','Publish'],['draft','Unpublish'],['sold','Mark Sold']]){if(item.status===state)continue;const b=el('button','secondary',label);b.addEventListener('click',async()=>{try{onlineStatus('Updating listing…');await cloudRequest('PATCH','marketplace_listings?id=eq.'+encodeURIComponent(item.id),{status:state});onlineStatus('Listing updated.');await Promise.all([refreshMineCloud(),refreshCloud()])}catch(e){onlineStatus('Error: '+e.message)}});action.append(b)}const del=el('button','secondary','Delete Cloud Listing');del.addEventListener('click',async()=>{if(!confirm('Permanently delete this cloud listing? This cannot be undone.'))return;try{await cloudRequest('DELETE','marketplace_listings?id=eq.'+encodeURIComponent(item.id));onlineStatus('Cloud listing deleted.');await Promise.all([refreshMineCloud(),refreshCloud()])}catch(e){onlineStatus('Error: '+e.message)}});action.append(del);wrap.append(action);target.append(wrap)}}catch(e){target.append(el('p','muted','Sign in to view your cloud listings. '+e.message))}}
