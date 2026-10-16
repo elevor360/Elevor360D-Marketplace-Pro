@@ -1,7 +1,7 @@
 {
-  "name": "Elevor360D Marketplace Pro V23",
-  "short_name": "Marketplace V22",
-  "description": "Marketplace with local privacy and security controls",
+  "name": "Elevor360D Marketplace Pro V23.2",
+  "short_name": "Marketplace Pro",
+  "description": "Marketplace Pro with compact navigation and improved offline updates",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
